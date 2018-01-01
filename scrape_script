@@ -1,0 +1,330 @@
+library(tidyverse)
+library(XML)
+library(purrr)
+library(magrittr)
+
+# Scrape function for thehuddle.com
+
+scrape_data = function(urlprefix, position, urlend, startyr, endyr) {
+  master = data.frame()
+  for (i in startyr:endyr) {
+    cat('Loading Year', i, '\n')
+    URL = paste(urlprefix, as.character(i), urlend, position, sep = "")
+    table = readHTMLTable(URL, stringsAsFactors=F)[[1]]
+    table$year = i
+    table$position = position
+    master = rbind(table, master)
+  }
+  return(master)
+}
+
+### We need to select everything before 2007
+### then everything after 2007 up to the pos=
+
+url <- "http://thehuddle.com/stats/2007/plays_std.php?pos=qb"
+
+urlprefix <- "http://thehuddle.com/stats/"
+urlend <- "/plays_std.php?pos="
+
+### scrape by position
+
+qb <- scrape_data(urlprefix, position = "qb", urlend, startyr = 2008, endyr = 2017)
+wr <- scrape_data(urlprefix, position = "wr", urlend, startyr = 2008, endyr = 2017)
+rb <- scrape_data(urlprefix, position = "rb", urlend, startyr = 2008, endyr = 2017)
+te <- scrape_data(urlprefix, position = "te", urlend, startyr = 2008, endyr = 2017)
+
+# lower the variable names
+names(qb) %<>% tolower
+names(rb) %<>% tolower
+names(te) %<>% tolower
+names(wr) %<>% tolower
+
+# merge dataframes
+all_pos <- bind_rows(list(qb, rb, te, wr))
+
+# change specific columns to numeric or factors from character
+qb <- qb %>% 
+  modify_at(c("player", "nfl", "position"), as.factor) %>% 
+  modify_at(c(3:16), as.numeric)
+
+wr <- wr %>% 
+  modify_at(c("player", "nfl", "position"), as.factor) %>% 
+  modify_at(c(3:16), as.numeric)
+
+te <- te %>% 
+  modify_at(c("player", "nfl", "position"), as.factor) %>% 
+  modify_at(c(3:16), as.numeric)
+
+rb <- rb %>% 
+  modify_at(c("player", "nfl", "position"), as.factor) %>% 
+  modify_at(c(3:16), as.numeric)
+
+all_pos <- all_pos %>% 
+  modify_at(c("player", "nfl", "position"), as.factor) %>% 
+  modify_at(c(3:16), as.numeric)
+
+# QB summary
+(sum_qb <- qb %>% 
+    filter(pass >= 300) %>% 
+    group_by(year) %>% 
+    summarize(pass_yds = mean(pyds, na.rm = T),
+              pass_td = mean(ptd, na.rm = T),
+              rush_yds = mean(ryd, na.rm = T),
+              rush_td = mean(rtd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    mutate(pass_yds_game = pass_yds/gp, 
+           pass_td_game = pass_td/gp,
+           rush_yds_game = rush_yds/gp,
+           rush_td_game = rush_td/gp)  %>% 
+    map_dfr(round, 2))
+
+(sum_te <- te %>% 
+    filter(pass >= 60) %>% 
+    group_by(year) %>% 
+    summarize(pass_yds = mean(pyds, na.rm = T),
+              pass_td = mean(ptd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    mutate(pass_yds_game = pass_yds/gp, 
+           pass_td_game = pass_td/gp)  %>% 
+    map_dfr(round, 2))
+
+(sum_wr <- wr %>% 
+    filter(cmp >= 60) %>% 
+    group_by(year) %>% 
+    summarize(yds = mean(pyds, na.rm = T),
+              td = mean(ptd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    mutate(yds_game = yds/gp, 
+           td_game = td/gp) %>% 
+    map_dfr(round, 2))
+
+(sum_rb <- rb %>% 
+    filter(ryd >= 800) %>% 
+    group_by(year) %>% 
+    summarize(rush_yds = mean(ryd, na.rm = T),
+              rush_td = mean(rtd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    mutate(rush_yds_game = rush_yds/gp, 
+           rush_td_game = rush_td/gp) %>% 
+    map_dfr(round, 2))
+
+(all_rb <- rb %>% 
+    group_by(year) %>% 
+    summarize(rush_yds = sum(ryd, na.rm = T),
+              rush_td = sum(rtd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    map_dfr(round, 2))
+
+(all_wr <- wr %>% 
+    group_by(year) %>% 
+    summarize(rec_yds = sum(pyds, na.rm = T),
+              rec_td = sum(ptd, na.rm = T),
+              n = n(),
+              gp = mean(gp)) %>% 
+    map_dfr(round, 2))
+
+(all_pos_sum <- all_pos %>%
+    group_by(year, position) %>% 
+    summarize(rec_pass_yds = sum(pyds, na.rm = T),
+              rec_pass_td = sum(ptd, na.rm = T),
+              rush_yds = sum(ryd, na.rm = T),
+              rush_td = sum(rtd, na.rm = T),
+              n = n(),
+              gp = mean(gp),
+              mean_rush_td = mean(sum(rtd, na.rm = T))))
+
+rb_qb <- all_pos_sum %>% 
+  filter(position == "qb")
+
+(all_rush <- all_pos %>% 
+  group_by(year, position) %>% 
+  summarize(rush_td = sum(rtd),
+            rec_td = sum(ptd),
+            rush_yds = sum(ryd),
+            rec_yds = sum(pyds),
+            fpts = sum(fpts)))
+
+avg_position <- all_rush %>% group_by(position) %>% 
+  summarize(rush_td = mean(rush_td),
+            rec_td = mean(rec_td),
+            rush_yds = mean(rush_yds, na.rm = T),
+            rec_yds = mean(rec_yds, na.rm = T),
+            fpts = mean(fpts, na.rm = T))
+
+all_pos_fpts <- all_pos %>% filter(gp > 12) %>% 
+  mutate(fpts_game = fpts/gp, scrim_yds = ryd+pyds, total_tds = rtd+ptd) %>% 
+  group_by(year, position) %>% top_n(n = 10, wt = fpts) %>% 
+  summarize(fpts = mean(fpts),
+            fpts_game = mean(fpts_game),
+            scrim_yds = mean(scrim_yds),
+            total_tds = mean(total_tds),
+            gp = mean(gp),
+            n = n()) %>% 
+  mutate(scrim_yds_game = scrim_yds/gp,
+         tds_game = total_tds/gp)
+
+all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>% 
+  summarize(fpts_game = mean(fpts_game),
+            scrim_yds = mean(scrim_yds),
+            total_tds = mean(total_tds),
+            n = n())
+
+
+(g1 <- ggplot() +
+    geom_point(data = filter(all_pos_sum, position == "rb" | position == "wr") ,aes(x = factor(year), y = rush_yds), size = 10, alpha = 0.8, color = "green4") +
+    geom_point(data = all_wr,aes(x = factor(year), y = rec_yds), size = 10, alpha = 0.8, color = "blue") +
+    coord_cartesian(ylim = c(0,100000)) +
+    labs(title = "WR receiving yards still outpace rushing yards",
+         subtitle = "but it is a down year for WRs",
+         caption = "Source: thehuddle.com     |     Graphic by Thomas Mock (@thomas_mock)",
+         x = "", y = "Yards per Game"))
+
+(g2 <- ggplot() +
+    geom_point(data = all_pos_sum,aes(x = factor(year), y = rec_pass_td, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rec_pass_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = avg_position, aes(color = position, yintercept = rec_td), size = 1.5, alpha = 0.4) +
+    geom_text(data = avg_position, aes(x = 1, y = rec_td, color = position, label = toupper(position)), alpha = 0.4, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,900)) +
+    labs(title = "Total passing touchdowns are trending down the past two years",
+         subtitle = "which is mirrored  by receiving touchdowns to WRs",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "TOUCHDOWNS\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+(g3 <- ggplot() +
+    geom_point(data = all_pos_sum,aes(x = factor(year), y = rush_td, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = avg_position, aes(color = position, yintercept = rush_td), size = 1.5, alpha = 0.4) +
+    #geom_hline(yintercept = 0, size = 1, color = "black") +
+    geom_text(data = avg_position, aes(x = 1, y = rush_td, color = position, label = toupper(position)), alpha = 0.4, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,450)) +
+    labs(title = "Total rushing touchdowns are down this year for RBs",
+         subtitle = "and are down in 5 of the last 7 years",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "TOUCHDOWNS\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+
+(g4 <- ggplot() +
+    geom_point(data = all_pos_sum, aes(x = factor(year), y = rec_pass_yds, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rec_pass_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = avg_position, aes(color = position, yintercept = rec_yds), size = 1.5, alpha = 0.4) +
+    geom_text(data = avg_position, aes(x = 1, y = rec_yds, color = position, label = toupper(position)), alpha = 0.4, vjust = -.5,  size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,150000)) +
+    labs(title = "Total passing yards declined this year",
+         subtitle = "and are the lowest since 2011",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "YARDS\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+(g5 <- ggplot() +
+    geom_point(data = all_pos_sum,aes(x = factor(year), y = rush_yds, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = avg_position, aes(color = position, yintercept = rush_yds), size = 1.5, alpha = 0.4) +
+    #geom_hline(yintercept = 0, size = 1, color = "black") +
+    geom_text(data = avg_position, aes(x = 1, y = rush_yds, color = position, label = toupper(position)), alpha = 0.4, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,60000)) +
+    labs(title = "Total rushing yards are down this year for RBs",
+         subtitle = "and are down in each of the last 5 years",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "YARDS\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+(g6 <- ggplot() +
+    geom_point(data = all_pos_fpts,aes(x = factor(year), y = fpts_game, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = all_pos_fpts_avg, aes(color = position, yintercept = fpts_game), size = 1.5, alpha = 0.4) +
+    geom_hline(yintercept = 0, size = 1, color = "black") +
+    geom_text(data = all_pos_fpts_avg, 
+              aes(x = 1, y = fpts_game, color = position, label = toupper(position)), 
+              alpha = 0.4, hjust = -0.3, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,30)) +
+    labs(title = "Average scoring for the top 10 at each skill position are down",
+         subtitle = "however QBs and WRs were the most affected",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "FANTASY POINTS PER GAME\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+(g7 <- ggplot() +
+    geom_point(data = all_pos_fpts,aes(x = factor(year), y = scrim_yds_game, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    #geom_hline(data = all_pos_fpts_avg, aes(color = position, yintercept = fpts_game), size = 1.5, alpha = 0.4) +
+    geom_hline(yintercept = 0, size = 1, color = "black") +
+    #geom_text(data = all_pos_fpts_avg, 
+              #aes(x = 1, y = fpts_game, color = position, label = toupper(position)), 
+              #alpha = 0.4, hjust = -0.3, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,300)) +
+    labs(title = "Average scoring for the top 10 at each skill position are down",
+         subtitle = "however QBs and WRs were the most affected",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "FANTASY POINTS PER GAME\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+(g8 <- ggplot() +
+    geom_point(data = all_pos_fpts,aes(x = factor(year), y = fpts_game, group = position, color = position), size = 8, alpha = 0.4) +
+    #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
+    geom_hline(data = all_pos_fpts_avg, aes(color = position, yintercept = fpts_game), size = 1.5, alpha = 0.4) +
+    geom_hline(yintercept = 0, size = 1, color = "black") +
+    geom_text(data = all_pos_fpts_avg, 
+              aes(x = 1, y = fpts_game, color = position, label = toupper(position)), 
+              alpha = 0.4, hjust = -0.3, vjust = -.5, size = 6, fontface = "bold") +
+    coord_cartesian(ylim = c(0,30)) +
+    labs(title = "Average scoring for the top 10 at each skill position are down",
+         subtitle = "however QBs and WRs were the most affected",
+         caption = "SOURCE: THEHUDDLE.COM     |     GRAPHIC BY THOMAS MOCK (@thomas_mock)",
+         x = "", y = "FANTASY POINTS PER GAME\n") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 16, face = "bold"),
+          plot.subtitle = element_text(size = 14),
+          axis.title.y = element_text(size = 16, face = "bold"),
+          axis.text.y = element_text(size = 14),
+          axis.text.x = element_text(size = 14, face = "bold")))
+
+# save the plots at reasonable sizes
+ggsave("rush_td.png", g3, width = 10, height = 8, units = "in")
+ggsave("rec_td.png", g2, width = 10, height = 8, units = "in")
+ggsave("rec_yd.png", g4, width = 10, height = 8, units = "in")
+ggsave("rush_yd.png", g5, width = 10, height = 8, units = "in")
+ggsave("top10_fpts_game.png", g6, width = 10, height = 8, units = "in")
