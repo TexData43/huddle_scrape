@@ -4,6 +4,8 @@ library(purrr)
 library(magrittr)
 
 # Scrape function for thehuddle.com
+# vectorized over year, slight issue if going back farther than 2008
+# due to website changes in the formatting
 
 scrape_data = function(urlprefix, position, urlend, startyr, endyr) {
   master = data.frame()
@@ -19,7 +21,7 @@ scrape_data = function(urlprefix, position, urlend, startyr, endyr) {
 }
 
 ### We need to select everything before 2007
-### then everything after 2007 up to the pos=
+### then everything after 2007 up to the `pos=`
 
 url <- "http://thehuddle.com/stats/2007/plays_std.php?pos=qb"
 
@@ -34,6 +36,8 @@ rb <- scrape_data(urlprefix, position = "rb", urlend, startyr = 2008, endyr = 20
 te <- scrape_data(urlprefix, position = "te", urlend, startyr = 2008, endyr = 2017)
 
 # lower the variable names
+# pass yards equivalent to receiving yards
+# as that is how thehuddle.com sets things up
 names(qb) %<>% tolower
 names(rb) %<>% tolower
 names(te) %<>% tolower
@@ -79,6 +83,7 @@ all_pos <- all_pos %>%
            rush_td_game = rush_td/gp)  %>% 
     map_dfr(round, 2))
 
+# TE summary w/ greater than 60 receptions
 (sum_te <- te %>% 
     filter(pass >= 60) %>% 
     group_by(year) %>% 
@@ -90,6 +95,7 @@ all_pos <- all_pos %>%
            pass_td_game = pass_td/gp)  %>% 
     map_dfr(round, 2))
 
+# WR summary w/ greater than 60 receptions
 (sum_wr <- wr %>% 
     filter(cmp >= 60) %>% 
     group_by(year) %>% 
@@ -101,6 +107,7 @@ all_pos <- all_pos %>%
            td_game = td/gp) %>% 
     map_dfr(round, 2))
 
+# RB with more than 800 rush yard summary
 (sum_rb <- rb %>% 
     filter(ryd >= 800) %>% 
     group_by(year) %>% 
@@ -112,6 +119,7 @@ all_pos <- all_pos %>%
            rush_td_game = rush_td/gp) %>% 
     map_dfr(round, 2))
 
+# all RB summary
 (all_rb <- rb %>% 
     group_by(year) %>% 
     summarize(rush_yds = sum(ryd, na.rm = T),
@@ -120,6 +128,7 @@ all_pos <- all_pos %>%
               gp = mean(gp)) %>% 
     map_dfr(round, 2))
 
+# all WR summary
 (all_wr <- wr %>% 
     group_by(year) %>% 
     summarize(rec_yds = sum(pyds, na.rm = T),
@@ -128,6 +137,7 @@ all_pos <- all_pos %>%
               gp = mean(gp)) %>% 
     map_dfr(round, 2))
 
+# ALL positions summary
 (all_pos_sum <- all_pos %>%
     group_by(year, position) %>% 
     summarize(rec_pass_yds = sum(pyds, na.rm = T),
@@ -138,9 +148,11 @@ all_pos <- all_pos %>%
               gp = mean(gp),
               mean_rush_td = mean(sum(rtd, na.rm = T))))
 
+# grab just the QB from the ALL positions sum
 rb_qb <- all_pos_sum %>% 
   filter(position == "qb")
 
+# get total rush, rec yds and tds, as well as fantasy points summary
 (all_rush <- all_pos %>% 
   group_by(year, position) %>% 
   summarize(rush_td = sum(rtd),
@@ -149,12 +161,17 @@ rb_qb <- all_pos_sum %>%
             rec_yds = sum(pyds),
             fpts = sum(fpts)))
 
+# AVG for all positions
 avg_position <- all_rush %>% group_by(position) %>% 
   summarize(rush_td = mean(rush_td),
             rec_td = mean(rec_td),
             rush_yds = mean(rush_yds, na.rm = T),
             rec_yds = mean(rec_yds, na.rm = T),
             fpts = mean(fpts, na.rm = T))
+
+# avg fantasy points, and fantasy points per game for players
+# with at least 12 games played (this was more of an exploratory 
+# analysis, to limit players with outrageous fpts/game if they got injured
 
 all_pos_fpts <- all_pos %>% filter(gp > 12) %>% 
   mutate(fpts_game = fpts/gp, scrim_yds = ryd+pyds, total_tds = rtd+ptd) %>% 
@@ -168,13 +185,15 @@ all_pos_fpts <- all_pos %>% filter(gp > 12) %>%
   mutate(scrim_yds_game = scrim_yds/gp,
          tds_game = total_tds/gp)
 
-all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>% 
+# ALL players fantasy points
+all_pos_fpts_avg <- all_pos_fpts %>% 
+group_by(position) %>% 
   summarize(fpts_game = mean(fpts_game),
             scrim_yds = mean(scrim_yds),
             total_tds = mean(total_tds),
             n = n())
 
-
+# receiving and rushing yards for just RBs and WRs
 (g1 <- ggplot() +
     geom_point(data = filter(all_pos_sum, position == "rb" | position == "wr") ,aes(x = factor(year), y = rush_yds), size = 10, alpha = 0.8, color = "green4") +
     geom_point(data = all_wr,aes(x = factor(year), y = rec_yds), size = 10, alpha = 0.8, color = "blue") +
@@ -184,6 +203,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
          caption = "Source: thehuddle.com     |     Graphic by Thomas Mock (@thomas_mock)",
          x = "", y = "Yards per Game"))
 
+# receivng tds for ALL positions (passing TDs for QBs)
 (g2 <- ggplot() +
     geom_point(data = all_pos_sum,aes(x = factor(year), y = rec_pass_td, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rec_pass_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -202,6 +222,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.y = element_text(size = 14),
           axis.text.x = element_text(size = 14, face = "bold")))
 
+# rush TD for ALL positions
 (g3 <- ggplot() +
     geom_point(data = all_pos_sum,aes(x = factor(year), y = rush_td, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -222,6 +243,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.x = element_text(size = 14, face = "bold")))
 
 
+# receiving yds for ALL positions
 (g4 <- ggplot() +
     geom_point(data = all_pos_sum, aes(x = factor(year), y = rec_pass_yds, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rec_pass_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -240,6 +262,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.y = element_text(size = 14),
           axis.text.x = element_text(size = 14, face = "bold")))
 
+# rush yards for all positions
 (g5 <- ggplot() +
     geom_point(data = all_pos_sum,aes(x = factor(year), y = rush_yds, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -259,6 +282,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.y = element_text(size = 14),
           axis.text.x = element_text(size = 14, face = "bold")))
 
+# fantasy pts/game for all positions
 (g6 <- ggplot() +
     geom_point(data = all_pos_fpts,aes(x = factor(year), y = fpts_game, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -280,6 +304,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.y = element_text(size = 14),
           axis.text.x = element_text(size = 14, face = "bold")))
 
+# scrimmage yards/game for ALL positions
 (g7 <- ggplot() +
     geom_point(data = all_pos_fpts,aes(x = factor(year), y = scrim_yds_game, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
@@ -301,6 +326,7 @@ all_pos_fpts_avg <- all_pos_fpts %>% group_by(position) %>%
           axis.text.y = element_text(size = 14),
           axis.text.x = element_text(size = 14, face = "bold")))
 
+# fantasy points/game for ALL positions duplicate
 (g8 <- ggplot() +
     geom_point(data = all_pos_fpts,aes(x = factor(year), y = fpts_game, group = position, color = position), size = 8, alpha = 0.4) +
     #geom_smooth(data = all_pos_sum, aes(x = factor(year), y = rush_td, group = position, color = position), method = "lm", se = F, alpha = 0.6) +
